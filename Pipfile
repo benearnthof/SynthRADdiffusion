@@ -6,6 +6,11 @@ name = "pypi"
 [packages]
 numpy = "*"
 torch = "*"
+einops = "*"
+tqdm = "*"
+rotary-embedding-torch = "*"
+torchvision = "*"
+matplotlib = "*"
 
 [dev-packages]
 
