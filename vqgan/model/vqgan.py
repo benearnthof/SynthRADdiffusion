@@ -1,0 +1,2 @@
+def VQGAN():
+  pass
