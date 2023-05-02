@@ -49,9 +49,20 @@ def shift_dim(x, src_dim=-1, dest_dim=-1, make_contiguous=True):
   return x  
 
 
-def adopt_weight(global_step, threshold, value):
-  pass
-
+def adopt_weight(global_step, threshold=0, value=0.):
+  """
+  Used to obtain a factor used to scale the discriminator loss of the VQGAN:
+  disc_factor = adopt_weight(global_step, threshold=discriminator_iter_start)
+  disc_loss = disc_factor * (1 * d_image_loss + 1 * d_video_loss)
+  global_step is the number of total training batches seen across all epochs
+  We give the generator a head start to stabilize training.
+  Discriminator_iter_start should be set between 10_000 and 50_000
+  Refer to the .yaml files in /config/model for information on hyperparameters.
+  """
+  weight = 1
+  if global_step < threshold:
+    weight = value
+  return weight
 
 def save_video_grid(video, fname, nrow, fps):
   """
@@ -69,3 +80,5 @@ def visualize_tensors(t, name=None, nest=0):
   Helper function to pretty print nested tensors for debugging purposes.
   """
   pass
+
+
