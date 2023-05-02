@@ -1,5 +1,5 @@
 import torch
-from vqgan.utils import shift_dim
+from vqgan.utils import shift_dim, adopt_weight
 
 # test tensor shift function
 torch.random.manual_seed(1)
@@ -10,3 +10,15 @@ y = shift_dim(x, 1, -1)
 # THEN
 assert x.size() == torch.Size([2, 3, 5])
 assert y.size() == torch.Size([2, 5, 3])
+
+# test adopt_weight to stall discriminator training
+# GIVEN
+global_step = 9999
+threshold = 10_000
+value = 0.
+
+# WHEN
+result = adopt_weight(global_step, threshold, value)
+
+# THEN
+assert result == value

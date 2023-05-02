@@ -64,21 +64,65 @@ def adopt_weight(global_step, threshold=0, value=0.):
     weight = value
   return weight
 
-def save_video_grid(video, fname, nrow, fps):
+def save_video_grid(video, fname, nrow=None, fps=6):
   """
   Helper function to save a video grid. 
   Used as a callback during training.
+  video: tensor of shape Batch, Channel, Time, Height, Width
+  fname: filename, needs to end in .mp4
+  nrow: number of rows in the grid, default:None
+  fps: number of frames that will be grouped for each second of video, default: 6
   """
-  pass
-
-def comp_getattr(args, attr_name, default=None):
-  pass
+  b, c, t, h, w = video.shape
+  video = video.permute(0, 2, 3, 4, 1) # move channels to last dimension
+  video = (video.cpu().numpy() * 255).astype('uint8') # denormalize & convert
+  if nrow is None: # get grid layout
+    nrow = math.ceil(math.sqrt(b))
+  ncol = math.ceil(b / nrow)
+  padding = 1 # prepare np array to store frames
+  video_grid = np.zeros((t, (padding + h) * nrow + padding, 
+                         (padding + w) * ncol + padding, c), dtype='uint8')
+  for i in range(b):
+    r = i // ncol
+    c = i % ncol
+    start_r = (padding + h) * r
+    start_c = (padding + w) * c
+    video_grid[:, start_r:start_r + h, start_c:start_c + w] = video[i]
+  video = []
+  for i in range(t):
+    video.append(video_grid[i])
+  imageio.mimsave(fname, video, fps=fps)
 
 
 def visualize_tensors(t, name=None, nest=0):
   """
-  Helper function to pretty print nested tensors for debugging purposes.
+  Pretty print tensors for debugging purposes.
   """
-  pass
+  if name is not None:
+    print(name, "current nest: ", nest)
+  print("type: ", type(t))
+  if 'dict' in str(type(t)):
+    print(t.keys())
+    for k in t.keys():
+      if t[k] is None:
+        print(k, "None")
+      else:
+        if 'Tensor' in str(type(t[k])):
+          print(k, t[k].shape)
+        elif 'dict' in str(type(t[k])):
+          print(k, 'dict')
+          visualize_tensors(t[k], name, nest + 1)
+        elif 'list' in str(type(t[k])):
+          print(k, len(t[k]))
+          visualize_tensors(t[k], name, nest + 1)
+  elif 'list' in str(type(t)):
+    print("list length: ", len(t))
+    for t2 in t:
+      visualize_tensors(t2, name, nest + 1)
+  elif 'Tensor' in str(type(t)):
+    print(t.shape)
+  else:
+    print(t)
+  return ""
 
 
