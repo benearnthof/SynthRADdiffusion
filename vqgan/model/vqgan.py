@@ -20,6 +20,10 @@ def silu(x):
   return x*torch.sigmoid(x)
 
 class SiLU(nn.Module):
+  """
+  Sigmoid Linear Unit as presented in 
+  https://arxiv.org/pdf/1710.05941.pdf
+  """
   def __init__(self):
     super(SiLU, self).__init__()
 
@@ -27,12 +31,18 @@ class SiLU(nn.Module):
     return silu(x)
 
 def hinge_d_loss(logits_real, logits_fake):
+  """
+  Hinge loss for discriminators, Uses ReLU as hinge function.
+  """
   loss_real = torch.mean(F.relu(1. - logits_real))
   loss_fake = torch.mean(F.relu(1. + logits_fake))
   d_loss = 0.5 * (loss_real + loss_fake)
   return d_loss
 
 def vanilla_d_loss(logits_real, logits_fake):
+  """
+  Alternative for discriminator loss used in experiments.
+  """
   d_loss = 0.5 * (
     torch.mean(torch.nn.functional.softplus(-logits_real)) +
     torch.mean(torch.nn.functional.softplus(logits_fake)))
@@ -41,31 +51,32 @@ def vanilla_d_loss(logits_real, logits_fake):
 class VQGAN(pl.LightningModule):
   def __init__(self, cfg):
     super().__init__()
-    self.cfg = cfg
-    self.embedding_dim = cfg.model.embedding_dim
-    self.n_codes = cfg.model.n_codes
+    self.cfg = cfg # obtained from config.yaml
+    self.embedding_dim = cfg.model.embedding_dim # 256
+    self.n_codes = cfg.model.n_codes # 2048
 
     self.encoder = Encoder(
-      cfg.model.n_hiddens,
-      cfg.model.downsample,
-      cfg.dataset.image_channels, 
-      cfg.model.norm_type, 
-      cfg.model.padding_type,
-      cfg.model.num_groups,
+      cfg.model.n_hiddens, # 240
+      cfg.model.downsample, # [4, 4, 4]
+      cfg.dataset.image_channels, # 1, depending on dataset of course
+      cfg.model.norm_type, # group
+      cfg.model.padding_type, # replicate
+      cfg.model.num_groups, # 32
       )
 
     self.decoder = Decoder(
-      cfg.model.n_hiddens, 
-      cfg.model.downsample, 
-      cfg.dataset.image_channels, 
-      cfg.model.norm_type, 
-      cfg.model.num_groups
+      cfg.model.n_hiddens, # 240
+      cfg.model.downsample, # [4, 4, 4]
+      cfg.dataset.image_channels, #1, depending on dataset of course 
+      cfg.model.norm_type, # group
+      cfg.model.num_groups #32
       )
-    self.enc_out_ch = self.encoder.out_channels
-    self.pre_vq_conv = SamePadConv3d(self.enc_out_ch, cfg.model.embedding_dim, 1, padding_type=cfg.model.padding_type)
-    self.post_vq_conv = SamePadConv3d(cfg.model.embedding_dim, self.enc_out_ch, 1)
-
-    self.codebook = Codebook(cfg.model.n_codes, cfg.model.embedding_dim, no_random_restart=cfg.model.no_random_restart, restart_thres=cfg.model.restart_thres)
+    self.enc_out_ch = self.encoder.out_channels # 960
+    # pre and post quantization conv layers. Used to learn a mapping from the quantized to the unquantized image and vice versa
+    self.pre_vq_conv = SamePadConv3d(self.enc_out_ch, self.embedding_dim, 1, padding_type=cfg.model.padding_type)
+    self.post_vq_conv = SamePadConv3d(self.embedding_dim, self.enc_out_ch, 1)
+    # no_random_restart=False, restart_thres = 1.0
+    self.codebook = Codebook(self.n_codes, self.embedding_dim, no_random_restart=cfg.model.no_random_restart, restart_thres=cfg.model.restart_thres)
 
     self.gan_feat_weight = cfg.model.gan_feat_weight
     # TODO: Changed batchnorm from sync to normal
@@ -76,18 +87,17 @@ class VQGAN(pl.LightningModule):
       self.disc_loss = vanilla_d_loss
     elif cfg.model.disc_loss_type == 'hinge':
       self.disc_loss = hinge_d_loss
-
+    # TODO: Cache vgg16 weights to avoid having to redownload every time
     self.perceptual_model = LPIPS().eval()
-
-    self.image_gan_weight = cfg.model.image_gan_weight
-    self.video_gan_weight = cfg.model.video_gan_weight
-
-    self.perceptual_weight = cfg.model.perceptual_weight
-
-    self.l1_weight = cfg.model.l1_weight
+    # TODO: Add calculate_lambda function that adjusts these weights during training (may be unstable)
+    self.image_gan_weight = cfg.model.image_gan_weight # 1
+    self.video_gan_weight = cfg.model.video_gan_weight # 1
+    self.perceptual_weight = cfg.model.perceptual_weight # 4
+    self.l1_weight = cfg.model.l1_weight # 4
     self.save_hyperparameters()
 
   def encode(self, x, include_embeddings=False, quantize=True):
+    # encode first then apply pre quant convolution, then quantize
     h = self.pre_vq_conv(self.encoder(x))
     if quantize:
       vq_output = self.codebook(h)
@@ -136,7 +146,7 @@ class VQGAN(pl.LightningModule):
       g_image_loss = -torch.mean(logits_image_fake)
       g_video_loss = -torch.mean(logits_video_fake)
       g_loss = self.image_gan_weight*g_image_loss + self.video_gan_weight*g_video_loss
-
+      # TODO: Do more efficiently: only calculate weights if disc_factor > 0
       disc_factor = adopt_weight(self.global_step, threshold=self.cfg.model.discriminator_iter_start)
       aeloss = disc_factor * g_loss
 
@@ -243,7 +253,14 @@ class VQGAN(pl.LightningModule):
 
 
 def Normalize(in_channels, norm_type='group', num_groups=32):
-  """Added num_groups, either 32 or 8"""
+  """
+  Allows us to switch between Batch Normalization for Images and Group Normalization for videos/3D data. 
+  In a nutshell, BNs error increases rapidly for shrinking batch sizes, because of larger inaccuracy in 
+  Batch statistic estimation. Because of the high memory demands for video/3D data we need small batches however. 
+  GN splits channels into groups and computes means and variances for normalization within each group. 
+  This is independent of batch size, thus more stable than BN for small batch sizes. 
+  https://arxiv.org/pdf/1803.08494.pdf
+  """
   assert norm_type in ['group', 'batch']
   if norm_type == 'group':
     return torch.nn.GroupNorm(num_groups=num_groups, num_channels=in_channels, eps=1e-6, affine=True)
@@ -252,6 +269,10 @@ def Normalize(in_channels, norm_type='group', num_groups=32):
 
 
 class Encoder(nn.Module):
+  """
+  Encodes Images into a latent representation. 
+  Has less model capacity than the decoder, used to obtain the conditioning vectors we need to pass to the DDPM.
+  """
   def __init__(self, n_hiddens, downsample, image_channel=3, norm_type='group', padding_type='replicate', num_groups=32):
     super().__init__()
     n_times_downsample = np.array([int(math.log2(d)) for d in downsample])
@@ -261,16 +282,17 @@ class Encoder(nn.Module):
     self.conv_first = SamePadConv3d(image_channel, n_hiddens, kernel_size=3, padding_type=padding_type)
 
     for i in range(max_ds):
-      block = nn.Module()
-      in_channels = n_hiddens * 2**i
+      block = nn.Module() # Every Block has one downsampling Convolution followed by a ResBlock
+      in_channels = n_hiddens * 2**i # hidden dim defined in config * 2^downsample iterations)
       out_channels = n_hiddens * 2**(i+1)
-      stride = tuple([2 if d > 0 else 1 for d in n_times_downsample])
+      stride = tuple([2 if d > 0 else 1 for d in n_times_downsample]) # tuple of strides for 3d conv, equals 2 for every axis if we downsample
       block.down = SamePadConv3d(in_channels, out_channels, 4, stride=stride, padding_type=padding_type)
       block.res = ResBlock(out_channels, out_channels, norm_type=norm_type, num_groups=num_groups)
       self.conv_blocks.append(block)
       n_times_downsample -= 1
 
     self.final_block = nn.Sequential(
+      # Final Normalization & Activation layers
       Normalize(out_channels, norm_type, num_groups=num_groups),
       SiLU()
     )
@@ -287,6 +309,10 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
+  """
+  Mirror Image of Encoder, swaps downsampling with upsampling layers. 
+  Has one ResBlock more than the Encoder, may need more model capacity for better performance.
+  """
   def __init__(self, n_hiddens, upsample, image_channel, norm_type='group', num_groups=32):
     super().__init__()
 
@@ -323,6 +349,10 @@ class Decoder(nn.Module):
 
 
 class ResBlock(nn.Module):
+  """
+  Residual Block for VQGAN Encoder & Decoder
+  Uses GroupNorm & Padding to keep tensors in correct shape
+  """
   def __init__(self, in_channels, out_channels=None, conv_shortcut=False, dropout=0.0, norm_type='group', padding_type='replicate', num_groups=32):
     super().__init__()
     self.in_channels = in_channels
@@ -330,31 +360,33 @@ class ResBlock(nn.Module):
     self.out_channels = out_channels
     self.use_conv_shortcut = conv_shortcut
 
-    self.norm1 = Normalize(in_channels, norm_type, num_groups=num_groups)
-    self.conv1 = SamePadConv3d(in_channels, out_channels, kernel_size=3, padding_type=padding_type)
-    self.dropout = torch.nn.Dropout(dropout)
-    self.norm2 = Normalize(in_channels, norm_type, num_groups=num_groups)
-    self.conv2 = SamePadConv3d(out_channels, out_channels, kernel_size=3, padding_type=padding_type)
+    self.block = nn.Sequential(
+      Normalize(in_channels, norm_type, num_groups=num_groups),
+      SiLU(),
+      SamePadConv3d(in_channels, out_channels, kernel_size=3, padding_type=padding_type),
+      Normalize(in_channels, norm_type, num_groups=num_groups),
+      SiLU(),
+      SamePadConv3d(out_channels, out_channels, kernel_size=3, padding_type=padding_type)
+    )
+
     if self.in_channels != self.out_channels:
+      # Channel up in case of dimensionality mismatch
       self.conv_shortcut = SamePadConv3d(in_channels, out_channels, kernel_size=3, padding_type=padding_type)
 
   def forward(self, x):
-    h = x
-    h = self.norm1(h)
-    h = silu(h)
-    h = self.conv1(h)
-    h = self.norm2(h)
-    h = silu(h)
-    h = self.conv2(h)
-
     if self.in_channels != self.out_channels:
-      x = self.conv_shortcut(x)
+      return self.conv_shortcut(x) + self.block(x)
+    else: 
+      return x + self.block(x)
 
-    return x+h
 
 
 # Does not support dilation
 class SamePadConv3d(nn.Module):
+  """
+  3D Conv layer with added padding used in ResBlock & For Input Downsampling in the Encoder. 
+  Also Used as final layer of the decoder.
+  """
   def __init__(self, in_channels, out_channels, kernel_size, stride=1, bias=True, padding_type='replicate'):
     super().__init__()
     if isinstance(kernel_size, int):
@@ -379,6 +411,10 @@ class SamePadConv3d(nn.Module):
 
 
 class SamePadConvTranspose3d(nn.Module):
+  """
+  3D ConvTranspose layer with added padding that is used for upsampling in decoder. 
+  Kernel Size will be set to 4, stride as 1 or 2 depending on position in network.
+  """
   def __init__(self, in_channels, out_channels, kernel_size, stride=1, bias=True, padding_type='replicate'):
     super().__init__()
     if isinstance(kernel_size, int):
