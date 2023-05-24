@@ -77,23 +77,24 @@ class ADNIDataset(Dataset):
                 d for d in dirs if any(xs in Path(d).name for xs in MASK_SUFFIXES)
             ]
             # proceed only if mask_matches is not empty
-            if mask_matches:
-                img_matches = []
-                for entry in mask_matches:
-                    if Path(entry).name == "MPR-R____Mask":
-                        img_matches.append(Path(entry).parent / "MPR-R____N3")
-                    elif Path(entry).name == "MPR____Mask":
-                        img_matches.append(Path(entry).parent / "MPR____N3")
-                    elif Path(entry).name == "MPR__GradWarp__B1_Correction__Mask":
-                        img_matches.append(
-                            Path(entry).parent / "MPR__GradWarp__B1_Correction"
-                        )
-                    elif Path(entry).name == "MPR-R__GradWarp__B1_Correction__Mask":
-                        img_matches.append(
-                            Path(entry).parent / "MPR-R__GradWarp__B1_Correction"
-                        )
-                    else:
-                        Warning(f"Did not find a match for folder {entry}")
+            if not mask_matches:
+                continue
+            img_matches = []
+            for entry in mask_matches:
+                if Path(entry).name == "MPR-R____Mask":
+                    img_matches.append(Path(entry).parent / "MPR-R____N3")
+                elif Path(entry).name == "MPR____Mask":
+                    img_matches.append(Path(entry).parent / "MPR____N3")
+                elif Path(entry).name == "MPR__GradWarp__B1_Correction__Mask":
+                    img_matches.append(
+                        Path(entry).parent / "MPR__GradWarp__B1_Correction"
+                    )
+                elif Path(entry).name == "MPR-R__GradWarp__B1_Correction__Mask":
+                    img_matches.append(
+                        Path(entry).parent / "MPR-R__GradWarp__B1_Correction"
+                    )
+                else:
+                    Warning(f"Did not find a match for folder {entry}")
             if len(mask_matches) == len(img_matches):
                 # construct pair of image and mask file folder
                 pairdict = [
@@ -106,7 +107,7 @@ class ADNIDataset(Dataset):
         output = [pair for pair, c in zip(pairs, check) if c]
         return output
 
-    def get_maskfolders():
+    def get_maskfolders(self):
         """
         get all unique folders that contain both an image and a mask
         """
@@ -115,19 +116,8 @@ class ADNIDataset(Dataset):
         subdirs = [glob.glob(os.path.join(folder, "*")) for folder in folders]
         # get folders with images and folders containing their respective masks
         # vector that indicates if subject_folder contains an image-mask pair
-        suffixes = [[Path(y).name for y in x] for x in subdirs]
-        has_pair = []
-
-        # if subdir ends with Mask
-        # check if dir
+        maskpairs = get_maskpairs(subdirs)
 
     # only select images that have a corresponding mask we can use
     # only select images with a high resolution
     # 256 if possible 512
-    # structure we are interested in:
-    # "MPR-R____N3" & "MPR-R____Mask"
-    # perhaps also
-    # "MPR____Mask" & "MPR____N3"
-    # also
-    # "MPR__GradWarp__B1_Correction__Mask"
-    # "MPR-R__GradWarp__B1_Correction__Mask"
