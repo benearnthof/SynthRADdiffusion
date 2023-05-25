@@ -17,7 +17,7 @@ Functions to import ADNI data for pretraining MRI VQGAN
 # Center B: 236 Rows, 174-236 Columns
 # Center C: 224-256 Rows, 204-256 Columns
 
-from typing import List
+from typing import List, Any
 import csv
 import numpy as np
 import torch
@@ -31,6 +31,7 @@ import argparse
 import glob
 import torchio as tio
 from pathlib import Path
+from warnings import warn
 
 PROJECT_ROOT = Path("D:\synthRAD2023")
 
@@ -60,10 +61,19 @@ class ADNIDataset(Dataset):
             os.path.join(root_dir, "ADNI_3T/ADNI/*"), recursive=True
         )
         self.augmentation = augmentation
+        # list of all subdirectories contained in subject folders
+        self.subdirs = [
+            glob.glob(os.path.join(folder, "*")) for folder in self.subject_folders
+        ]
+        # get folders with images and folders containing their respective masks
+        # vector that indicates if subject_folder contains an image-mask pair
+        self.mask_pairs = self.get_maskpairs(self.subdirs)
+        self.file_names = self.get_file_names()
 
     def __len__(self):
-        return len(self.subject_folders)
+        return len(self.file_names)
 
+    @staticmethod
     def get_maskpairs(dirlist: List[List[str]]):
         """
         check if dirlist contains pairs of image- and respective mask folders
@@ -81,20 +91,16 @@ class ADNIDataset(Dataset):
                 continue
             img_matches = []
             for entry in mask_matches:
-                if Path(entry).name == "MPR-R____Mask":
-                    img_matches.append(Path(entry).parent / "MPR-R____N3")
-                elif Path(entry).name == "MPR____Mask":
-                    img_matches.append(Path(entry).parent / "MPR____N3")
-                elif Path(entry).name == "MPR__GradWarp__B1_Correction__Mask":
-                    img_matches.append(
-                        Path(entry).parent / "MPR__GradWarp__B1_Correction"
-                    )
-                elif Path(entry).name == "MPR-R__GradWarp__B1_Correction__Mask":
-                    img_matches.append(
-                        Path(entry).parent / "MPR-R__GradWarp__B1_Correction"
-                    )
+                if Path(entry).name == MASK_SUFFIXES[0]:
+                    img_matches.append(Path(entry).parent / IMG_SUFFIXES[0])
+                elif Path(entry).name == MASK_SUFFIXES[1]:
+                    img_matches.append(Path(entry).parent / IMG_SUFFIXES[1])
+                elif Path(entry).name == MASK_SUFFIXES[2]:
+                    img_matches.append(Path(entry).parent / IMG_SUFFIXES[2])
+                elif Path(entry).name == MASK_SUFFIXES[3]:
+                    img_matches.append(Path(entry).parent / IMG_SUFFIXES[3])
                 else:
-                    Warning(f"Did not find a match for folder {entry}")
+                    warn(f"Did not find a match for folder {entry}")
             if len(mask_matches) == len(img_matches):
                 # construct pair of image and mask file folder
                 pairdict = [
@@ -107,17 +113,38 @@ class ADNIDataset(Dataset):
         output = [pair for pair, c in zip(pairs, check) if c]
         return output
 
-    def get_maskfolders(self):
+    def get_file_names(self):
         """
-        get all unique folders that contain both an image and a mask
+        Use the pairs of directories for mask and image data to recursively obtain the
+        paths of all .nii files
+        The img-mask pairs always contain a directory for each measurement, which in turn
+        contain a single directory in which the .nii file is contained.
         """
-        folders = self.subject_folders
-        # list of all subdirectories contained in subject folders
-        subdirs = [glob.glob(os.path.join(folder, "*")) for folder in folders]
-        # get folders with images and folders containing their respective masks
-        # vector that indicates if subject_folder contains an image-mask pair
-        maskpairs = get_maskpairs(subdirs)
+        for pair in self.mask_pairs:
+            pair["img_files"] = glob.glob(
+                os.path.join(pair["img"], "*/*/*.nii"), recursive=True
+            )
+            pair["mask_files"] = glob.glob(
+                os.path.join(pair["mask"], "*/*/*.nii"), recursive=True
+            )
+            if len(pair["img_files"]) != len(pair["mask_files"]):
+                self.mask_pairs.remove(pair)
+                Warning(
+                    f"Uneven Amount of Measurements in {pair}; removed from mask_pairs."
+                )
+        # now finally obtain a paired list with each individual .nii image-mask pair
+        file_names = [
+            {"image": img, "mask": msk}  # construct dict from nested list
+            for img, msk in zip(pair["img_files"], pair["mask_files"])
+            for pair in self.mask_pairs
+        ]
+        return file_names
 
-    # only select images that have a corresponding mask we can use
+    def crop(self, image):
+        pass
+
+    def __getitem__(self, index) -> Any:
+        pass
+
     # only select images with a high resolution
     # 256 if possible 512
