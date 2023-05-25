@@ -140,11 +140,25 @@ class ADNIDataset(Dataset):
         ]
         return file_names
 
-    def crop(self, image):
+    def crop(self, image, mask):
+        """
+        Crop image according to mask
+        """
         pass
 
     def __getitem__(self, index) -> Any:
-        pass
+        """
+        Get a single image that is cropped and preprocessed
+        """
+        entry = self.file_names[index]
+        img = nib.load(entry["image"])
+        msk = nib.load(entry["mask"])
+        # axes of mask and image are swapped for some reason
+        img2 = np.swapaxes(np.asanyarray(img.dataobj), 1, 2)
+        # this is not correct, need to visualize what's going on and then align with mask
+
+        img3 = np.flip(img2, 1)
+        img4 = np.flip(img3, 2)
 
     # only select images with a high resolution
     # 256 if possible 512
