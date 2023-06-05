@@ -54,7 +54,10 @@ def run(cfg: DictConfig):
     )
 
     model = VQGAN(cfg)
+    print(model)
 
+
+"""
     callbacks = []
     callbacks.append(
         ModelCheckpoint(
@@ -129,3 +132,5 @@ def run(cfg: DictConfig):
 
 if __name__ == "__main__":
     run()
+
+"""
