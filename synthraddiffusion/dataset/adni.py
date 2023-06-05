@@ -33,7 +33,9 @@ import torchio as tio
 from pathlib import Path
 from warnings import warn
 
-PROJECT_ROOT = Path("D:\synthRAD2023")
+PROJECT_ROOT = Path(
+    "D:\synthRAD2023"
+)  # TODO: remove as the dataset is instantiated only through config
 
 MASK_SUFFIXES = [
     "MPR-R____Mask",
