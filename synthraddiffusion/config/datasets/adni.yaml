@@ -1,0 +1,4 @@
+name: ADNI
+root_dir: D:\synthRAD2023\ADNI_3T\ADNI\
+image_channels: 1
+augmentation: True
