@@ -37,3 +37,20 @@ check = [
     for x in ds.file_names
 ]
 assert all(x for x in check)
+
+
+# write tests to verify masking, preprocessing & augmentation
+img_slice = img_data[:, :, 85]
+msk_slice = msk_data[:, :, 85]
+msk_slice_swapped = msk_swapped[:, :, 85]
+msk_slice_rot90 = msk_rot90[:, :, 85]
+
+# check if mask and image match
+masked_slice = np.where(msk_slice_rot90 > 0, img_slice, 0)
+# this seems to be correct
+test = PREPROCESSING_TRANSORMS(out)
+test = torch.squeeze(test)
+test = test[:, :, 64]
+# test = test * 2 - 1
+plt.imshow(test)
+plt.show()

@@ -51,6 +51,8 @@ IMG_SUFFIXES = [
     "MPR-R__GradWarp__B1_Correction",
 ]
 
+PREPROCESSING_TRANSORMS = tio.Compose([tio.RescaleIntensity(out_min_max=(-1, 1))])
+
 
 class ADNIDataset(Dataset):
     """
@@ -73,6 +75,7 @@ class ADNIDataset(Dataset):
         # vector that indicates if subject_folder contains an image-mask pair
         self.mask_pairs = self.get_maskpairs(self.subdirs)
         self.file_names = self.get_file_names(self.mask_pairs)
+        self.preprocessing_transforms = PREPROCESSING_TRANSORMS
 
     def __len__(self):
         return len(self.file_names)
@@ -195,7 +198,8 @@ class ADNIDataset(Dataset):
             img = img * random_i.data.cpu().numpy()
         out = torch.from_numpy(img).float().view(1, res, res, res)
         # very sussy line
-        out = out * 2 - 1
+        # out = out * 2 - 1
+        out = self.preprocessing(out)  # normalize in a consistent fashion
         return {"data", out}
 
 
@@ -208,11 +212,15 @@ msk_slice_rot90 = msk_rot90[:, :, 85]
 # check if mask and image match
 masked_slice = np.where(msk_slice_rot90 > 0, img_slice, 0)
 # this seems to be correct
-test = torch.squeeze(out)
+test = PREPROCESSING_TRANSORMS(out)
+test = torch.squeeze(test)
 test = test[:, :, 64]
-test = test * 2 - 1
+# test = test * 2 - 1
 plt.imshow(test)
 plt.show()
 
+
 # only select images with a high resolution
 # 256 is our target, may need to downsample for vqgan
+# so far 128 seems like a sweetspot, may need to downsample further depending on memory
+# 128 should use 8 times more memory than 64
