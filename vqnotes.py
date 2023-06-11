@@ -1,4 +1,4 @@
-mod = run(cfg)
+mod = run(cfg) # run as in train_vqgan.py
 # n_hiddens = 240 vs 64
 n_params = sum(p.numel() for p in mod.parameters())  # 88 million vs 32 million
 n_encoder = sum(

@@ -2,3 +2,5 @@ name: ADNI
 root_dir: D:\synthRAD2023
 image_channels: 1
 augmentation: True
+mask: True
+resolution: 128

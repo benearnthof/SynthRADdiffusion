@@ -57,7 +57,9 @@ class ADNIDataset(Dataset):
     Wrapper around PyTorch Dataset to load and transform ADNI data
     """
 
-    def __init__(self, root_dir=PROJECT_ROOT, augmentation=False):
+    def __init__(
+        self, root_dir=PROJECT_ROOT, augmentation=False, mask=True, resolution=128
+    ):
         self.root_dir = root_dir
         self.subject_folders = glob.glob(
             os.path.join(root_dir, "ADNI_3T/ADNI/*"), recursive=True
@@ -143,26 +145,74 @@ class ADNIDataset(Dataset):
         ]
         return file_names
 
-    def crop(self, image, mask):
+    @staticmethod
+    def mask_image(image, mask):
         """
         Crop image according to mask
         """
-        pass  # TODO: finish crop and getitem methods
+        # axes of mask and image are swapped for some reason
+        mask_swapped = np.swapaxes(mask, 0, 2)  # this is correct
+        # need to rotate for some reason TODO: write tests to verify that all adni images are processed correctly.
+        mask_rot90 = np.rot90(mask_swapped, 2)
+        masked_image = np.where(mask_rot90 > 0, image, 0)
+        return masked_image
+
+    @staticmethod
+    def crop_image(image):
+        crop_mask = image > 0
+        # coords of nonblack pixels
+        coords = np.argwhere(crop_mask)
+        # Bounding box of non-black pixels.
+        x0, y0, z0 = coords.min(axis=0)
+        x1, y1, z1 = coords.max(axis=0) + 1  # slices are exclusive at the top
+        cropped = image[x0:x1, y0:y1, z0:z1]
+        # add channel dimension to image
+        padded_crop = tio.CropOrPad(np.max(cropped.shape))(cropped.copy()[None])
+        padded_crop = np.transpose(padded_crop, (1, 2, 3, 0))
+        return padded_crop
 
     def __getitem__(self, index) -> Any:
         """
         Get a single image that is cropped and preprocessed
         """
+        res = self.resolution
         entry = self.file_names[index]
         img = nib.load(entry["image"])
         msk = nib.load(entry["mask"])
-        # axes of mask and image are swapped for some reason
-        img2 = np.swapaxes(np.asanyarray(img.dataobj), 1, 2)
-        # this is not correct, need to visualize what's going on and then align with mask
+        # get np arrays
+        img_data = np.asanyarray(img.dataobj)  # TODO: add non masking case
+        msk_data = np.asanyarray(msk.dataobj)
+        # mask then crop
+        masked_image = self.mask_image(img_data, msk_data)
+        cropped_image = crop_image(masked_image)
+        # resize to uniform size
+        img = resize(cropped_image, (res, res, res), mode="constant")
+        if self.augmentation:
+            random_n = torch.rand(1)
+            random_i = 0.3 * torch.rand(1)[0] + 0.7
+            if random_n[0] > 0.5:
+                img = np.flip(img, 0)
+            img = img * random_i.data.cpu().numpy()
+        out = torch.from_numpy(img).float().view(1, res, res, res)
+        # very sussy line
+        out = out * 2 - 1
+        return {"data", out}
 
-        img3 = np.flip(img2, 1)
-        img4 = np.flip(img3, 2)
-        pass
 
-    # only select images with a high resolution
-    # 256 if possible 512
+# TODO: move to test file to verify image loading
+img_slice = img_data[:, :, 85]
+msk_slice = msk_data[:, :, 85]
+msk_slice_swapped = msk_swapped[:, :, 85]
+msk_slice_rot90 = msk_rot90[:, :, 85]
+
+# check if mask and image match
+masked_slice = np.where(msk_slice_rot90 > 0, img_slice, 0)
+# this seems to be correct
+test = torch.squeeze(out)
+test = test[:, :, 64]
+test = test * 2 - 1
+plt.imshow(test)
+plt.show()
+
+# only select images with a high resolution
+# 256 is our target, may need to downsample for vqgan
