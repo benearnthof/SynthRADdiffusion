@@ -15,8 +15,16 @@ from synthraddiffusion.train.get_dataset import get_dataset
 import hydra  # config manager
 from omegaconf import DictConfig, open_dict
 
+from hydra import compose, initialize
+from omegaconf import OmegaConf
 
-@hydra.main(config_path="../config", config_name="base_cfg", version_base=None)
+initialize(config_path="./synthraddiffusion/config", version_base=None)
+cfg = compose(config_name="base_cfg", overrides=["dataset=adni", "model=vqgan"])
+
+
+# @hydra.main(
+#    config_path="./synthraddiffusion/config", config_name="base_cfg", version_base=None
+# )
 def run(cfg: DictConfig):
     pl.seed_everything(cfg.model.seed)
     train_dataset, val_dataset, sampler = get_dataset(cfg)
@@ -39,7 +47,6 @@ def run(cfg: DictConfig):
         cfg.model.gpus,
         cfg.model.accumulate_grad_batches,
     )
-
     with open_dict(cfg):
         cfg.model.lr = accumulate * (ngpu / 8.0) * (bs / 4.0) * base_lr
         cfg.model.default_root_dir = os.path.join(
@@ -52,11 +59,13 @@ def run(cfg: DictConfig):
             cfg.model.lr, accumulate, ngpu / 8, bs / 4, base_lr
         )
     )
-
     model = VQGAN(cfg)
     print(model)
+    return model
 
 
+if __name__ == "__main__":
+    run()
 """
     callbacks = []
     callbacks.append(

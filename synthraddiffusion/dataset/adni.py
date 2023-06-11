@@ -70,7 +70,7 @@ class ADNIDataset(Dataset):
         # get folders with images and folders containing their respective masks
         # vector that indicates if subject_folder contains an image-mask pair
         self.mask_pairs = self.get_maskpairs(self.subdirs)
-        self.file_names = self.get_file_names()
+        self.file_names = self.get_file_names(self.mask_pairs)
 
     def __len__(self):
         return len(self.file_names)
@@ -115,14 +115,15 @@ class ADNIDataset(Dataset):
         output = [pair for pair, c in zip(pairs, check) if c]
         return output
 
-    def get_file_names(self):
+    @staticmethod
+    def get_file_names(mask_pairs):
         """
         Use the pairs of directories for mask and image data to recursively obtain the
         paths of all .nii files
         The img-mask pairs always contain a directory for each measurement, which in turn
         contain a single directory in which the .nii file is contained.
         """
-        for pair in self.mask_pairs:
+        for pair in mask_pairs:
             pair["img_files"] = glob.glob(
                 os.path.join(pair["img"], "*/*/*.nii"), recursive=True
             )
@@ -130,7 +131,7 @@ class ADNIDataset(Dataset):
                 os.path.join(pair["mask"], "*/*/*.nii"), recursive=True
             )
             if len(pair["img_files"]) != len(pair["mask_files"]):
-                self.mask_pairs.remove(pair)
+                mask_pairs.remove(pair)
                 Warning(
                     f"Uneven Amount of Measurements in {pair}; removed from mask_pairs."
                 )
@@ -138,7 +139,7 @@ class ADNIDataset(Dataset):
         file_names = [
             {"image": img, "mask": msk}  # construct dict from nested list
             for img, msk in zip(pair["img_files"], pair["mask_files"])
-            for pair in self.mask_pairs
+            for pair in mask_pairs
         ]
         return file_names
 
@@ -146,7 +147,7 @@ class ADNIDataset(Dataset):
         """
         Crop image according to mask
         """
-        pass
+        pass  # TODO: finish crop and getitem methods
 
     def __getitem__(self, index) -> Any:
         """
@@ -161,6 +162,7 @@ class ADNIDataset(Dataset):
 
         img3 = np.flip(img2, 1)
         img4 = np.flip(img3, 2)
+        pass
 
     # only select images with a high resolution
     # 256 if possible 512
